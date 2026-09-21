@@ -21,8 +21,11 @@ CompileFlags:
 
 Diagnostics:
   Suppress:
-    - "*"
-    #- "unknown_typename"
-    #- "unknown_type_name"
-    #- "pp_file_not_found"
-    #- "undeclared_var_use"
+    #- "*"
+    - "unknown_typename"
+    - "unknown_type_name"
+    - "pp_file_not_found"
+    - "undeclared_var_use"
+    - "mlongcalls"
+    - "unknown_argument"
+    - "ovl_no_viable_member_function_in_call"

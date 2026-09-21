@@ -372,8 +372,8 @@ void loop() {
   display.print("Pressao: ");
   display.print(pressao, 0);
   display.println(" hPa");
-  //display.setCursor(0, 48);
-  //display.print("=-=-=-=-=");
+  display.setCursor(0, 48);
+  display.print("--------");
   display.display();
 
   // Executa rotina LoRaWAN

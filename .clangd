@@ -1,2 +1,28 @@
+#CompileFlags:
+#  Remove: [-fno-tree-scev-cprop, -fno-split-wide-types, -mmcu=]
+
+# test new compile flags for error supress:
 CompileFlags:
-  Remove: [-fno-tree-scev-cprop, -fno-split-wide-types, -mmcu=]
+  Add:
+    - "-ferror-limit=0"
+    - "-include"
+    - "Arduino.h"
+    - "-DARDUINO=10812"
+    - "-DESP32"
+    - "-DPROGMEM="
+    - "-D__extension__="
+    - "-D__attribute__(x)="
+  Remove:
+    - "-fno-tree-switch-conversion"
+    - "-fstrict-volatile-bitfields"
+    - "-mfix-esp32-psram-cache-issue"
+    - "-mlongcalls"
+    - fno-tree-scev-cprop, -fno-split-wide-types, -mmcu=
+
+Diagnostics:
+  Suppress:
+    - "*"
+    #- "unknown_typename"
+    #- "unknown_type_name"
+    #- "pp_file_not_found"
+    #- "undeclared_var_use"

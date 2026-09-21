@@ -36,9 +36,14 @@ void do_send(osjob_t* j); // Declaração da função do_send, que é responsáv
 
 //nwmskey e appskey são as chaves de rede e de aplicação para autenticar nosso dispositivo na rede lora
 // o devaddr é device adress, um idetenficiador unico do dispositivo na rede.
-static const PROGMEM u1_t NWKSKEY[16] = {0x1D, 0x4C, 0x02, 0xD0, 0x54, 0xD9, 0x37, 0xC4, 0xFB, 0x36, 0xEA, 0x48, 0xFD, 0xDB, 0x94, 0x65};
-static const u1_t PROGMEM APPSKEY[16] = {0x7A, 0x5D, 0xB6, 0xA9, 0xA5, 0x12, 0x6F, 0xC9, 0x85, 0x86, 0x5A, 0x63, 0x38, 0x17, 0xC2, 0xB5};
-static const u4_t DEVADDR = 0x260DC7A4;
+// config device antigo:
+//static const PROGMEM u1_t NWKSKEY[16] = {0x1D, 0x4C, 0x02, 0xD0, 0x54, 0xD9, 0x37, 0xC4, 0xFB, 0x36, 0xEA, 0x48, 0xFD, 0xDB, 0x94, 0x65};
+//static const u1_t PROGMEM APPSKEY[16] = {0x7A, 0x5D, 0xB6, 0xA9, 0xA5, 0x12, 0x6F, 0xC9, 0x85, 0x86, 0x5A, 0x63, 0x38, 0x17, 0xC2, 0xB5};
+//static const u4_t DEVADDR = 0x260DC7A4;
+
+static const u1_t PROGMEM NWKSKEY[16] = {0x6D, 0xDD, 0xD0, 0x2D, 0xE9, 0x20, 0x62, 0x27, 0x90, 0x51, 0x29, 0xC7, 0x30, 0xD2, 0xA4, 0xB7};
+static const u1_t PROGMEM APPSKEY[16] = {0x96, 0xCB, 0x3E, 0x51, 0xD0, 0x71, 0xB2, 0x5B, 0xD8, 0x52, 0x5A, 0x67, 0x20, 0x9E, 0x6D, 0xF9};
+static const u4_t DEVADDR = 0x260DF8C4;
 
 // definição dos nossos pacotes de dados, e do intervalo de envio
 int n_packet=0;
@@ -203,11 +208,14 @@ void do_send(osjob_t* j) {
 
 void setupLoRaWAN()
 {
-
+  Serial.println();
+  Serial.println(F("--> init LMIC"));
   // LMIC init
   os_init();
   // Reset the MAC state. Session and pending data transfers will be discarded.
   LMIC_reset();
+
+  Serial.println(F("--> init os_init() + LMIC_reset()"));
 
   // Set static session parameters. Instead of dynamically establishing a session
   // by joining the network, precomputed session parameters are be provided.
@@ -284,7 +292,6 @@ void setupLoRaWAN()
 #else
 # error Region not supported
 #endif
-
   // Disable link check validation
   LMIC_setLinkCheckMode(0);
 
@@ -294,6 +301,7 @@ void setupLoRaWAN()
   // Set data rate and transmit power for uplink
   LMIC_setDrTxpow(DR_SF9, LORA_GAIN);
 
+  Serial.println(F("config LoRa done"));
 
   // Start job
   do_send(&sendjob);
@@ -302,7 +310,6 @@ void setupLoRaWAN()
 
 
 void setup() {
-
   Serial.begin(115200); // começamso a conexão com o monitor serial, para debug e leitura de dados
   Wire.begin(OLED_SDA, OLED_SCL); // começamos a comunicar com o display
   delay(100); // delay para garantir que a comunicação aconteça antes de prosseguir
@@ -348,7 +355,6 @@ void setup() {
 
 
 void loop() {
-
   // coleto os valores de temp e pressão do sensor // uso dummy, depende.
   temperatura = pegartemperatura();
   pressao = pegarpressao();
@@ -366,8 +372,8 @@ void loop() {
   display.print("Pressao: ");
   display.print(pressao, 0);
   display.println(" hPa");
-  display.setCursor(0, 48);
-  display.print("=-=-=-=-=");
+  //display.setCursor(0, 48);
+  //display.print("=-=-=-=-=");
   display.display();
 
   // Executa rotina LoRaWAN

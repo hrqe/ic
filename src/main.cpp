@@ -6,6 +6,17 @@
 #include <Adafruit_GFX.h>    // biblioteca gráfica, usada para desenhar no display OLED
 #include <Adafruit_SSD1306.h> // biblioteca para controlar o display OLED SSD1306
 
+// sensor DHT22
+#include <DHT.h>
+#define DHT_PIN 27
+#define DHT_TYPE DHT22
+DHT dht(DHT_PIN, DHT_TYPE);
+
+// mics analógico --> entradas ADC da esp
+#define MICS_CO_PIN   34
+#define MICS_NH3_PIN  35
+#define MICS_NO2_PIN  36
+
 //#define  LMIC_DEBUG_LEVEL = 1
 #define LMIC_DEBUG_LEVEL 1
 #define CFG_au915
@@ -160,7 +171,7 @@ void onEvent (ev_t ev) {
 
 int count = 5;
 
-float temperatura = 0.0;
+float temperaturaBMP = 0.0;
 float pressao = 0.0;
 
 float pegarpressao(){
@@ -181,30 +192,33 @@ float pegartemperatura(){
   }
 }
 
+
+
+
 void do_send(osjob_t* j) {
   // Check if there is not a current TX/RX job running
 
   //displayValues();
 
-      if (LMIC.opmode & OP_TXRXPEND)  // checa se o rádio já está ocupado transmitindo algo. Se estiver, ele aborta o novo envio para não causar colisão
-      {
+      if (LMIC.opmode & OP_TXRXPEND){ // checa se o rádio já está ocupado transmitindo algo. Se estiver, ele aborta o novo envio para não causar colisão
         Serial.println(F("OP_TXRXPEND, not sending"));
         //LoraStatus = "OP_TXRXPEND, not sending";
       }
-      else
-      {
-
-        temperatura = pegartemperatura();
+      else{
+        temperaturaBMP = pegartemperatura();
         pressao = pegarpressao();
 
         buildPacket(txBuffer);
         n_packet++;
         LMIC_setTxData2(1, txBuffer, sizeof(txBuffer), 0);  // coloca o pacote na fila de envio na Porta 1. O parâmetro 0 indica que o envio não é confirmado, ou seja, o dispositivo não espera por um reconhecimento do servidor para considerar o envio bem-sucedido. Se fosse 1, o dispositivo aguardaria um reconhecimento do servidor para confirmar que o pacote foi recebido corretamente. O uso de envios não confirmados pode ser útil para economizar energia e reduzir a latência, mas pode resultar em perda de pacotes se houver interferência ou problemas de comunicação na rede.
         Serial.println(F("Packet queued"));
-
       }
   // Next TX is scheduled after TX_COMPLETE event.
 }
+
+
+
+
 
 void setupLoRaWAN()
 {
@@ -309,9 +323,18 @@ void setupLoRaWAN()
 }
 
 
+
+
+
 void setup() {
   Serial.begin(115200); // começamso a conexão com o monitor serial, para debug e leitura de dados
+
   Wire.begin(OLED_SDA, OLED_SCL); // começamos a comunicar com o display
+
+  // inicialização DHT22
+  Serial.println("init DHT22");
+  dht.begin();
+
   delay(100); // delay para garantir que a comunicação aconteça antes de prosseguir
 
   if(dummy == 0) {
@@ -331,11 +354,19 @@ void setup() {
   }
 
 
+  // conexão mics analogico
+  pinMode(MICS_CO_PIN, INPUT);
+  pinMode(MICS_NH3_PIN, INPUT);
+  pinMode(MICS_NO2_PIN, INPUT);
+  analogReadResolution(12); // 0 a 4095
+  Serial.println("MiCS-6814 analogico inicializado.");
+
+
+  // inicialização oled
   pinMode(OLED_RST, OUTPUT);
   digitalWrite(OLED_RST, LOW);
   delay(20);
   digitalWrite(OLED_RST, HIGH);
-
 
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3c, false, false)) { // Address 0x3C for 128x32
     Serial.println(F("SSD1306 allocation failed"));
@@ -350,14 +381,47 @@ void setup() {
   display.display();
 
   setupLoRaWAN();
-
 }
+
 
 
 void loop() {
   // coleto os valores de temp e pressão do sensor // uso dummy, depende.
-  temperatura = pegartemperatura();
+  temperaturaBMP = pegartemperatura();
   pressao = pegarpressao();
+
+  float umidade = dht.readHumidity();
+  float temperatura = dht.readTemperature();
+
+  if (isnan(umidade) || isnan(temperatura))
+      {
+          Serial.println("erro leitura DHT22");
+          delay(2000);
+          return;
+      }
+
+      Serial.print("Temperatura: ");
+      Serial.print(temperatura);
+      Serial.println(" °C");
+
+      Serial.print("Umidade: ");
+      Serial.print(umidade);
+      Serial.println(" %");
+
+      delay(2000);
+
+
+  // leitura mics analogico
+  int co  = analogRead(MICS_CO_PIN);
+  int nh3 = analogRead(MICS_NH3_PIN);
+  int no2 = analogRead(MICS_NO2_PIN);
+  Serial.print("CO: ");
+  Serial.print(co);
+  Serial.print(" | NH3: ");
+  Serial.print(nh3);
+  Serial.print(" | NO2: ");
+  Serial.println(no2);
+  delay(2000);
 
   // Mostra no display
   display.clearDisplay();
@@ -366,7 +430,7 @@ void loop() {
   display.println("=== BMP280 SENSOR ===");
   display.setCursor(0, 16);
   display.print("Temp: ");
-  display.print(temperatura, 1);
+  display.print(temperaturaBMP, 1);
   display.println(" C");
   display.setCursor(0, 32);
   display.print("Pressao: ");
@@ -379,6 +443,7 @@ void loop() {
   // Executa rotina LoRaWAN
   os_runloop_once(); // esse comando é essencial para que a biblioteca LMIC funcione corretamente. Ele processa os eventos de rede, como o envio e recebimento de pacotes, e garante que a comunicação LoRaWAN ocorra de forma eficiente. Sem essa chamada, o dispositivo não seria capaz de enviar ou receber dados via LoRaWAN, e a funcionalidade de comunicação sem fio não funcionaria como esperado.
   // se ele não estivesse aqui o loop ficaria preso, e não conseguiria processar os eventos de rede, o que impediria o envio e recebimento de pacotes via LoRaWAN. Isso é crucial para garantir que a comunicação sem fio funcione corretamente, permitindo que o dispositivo envie os dados coletados para a rede e receba quaisquer mensagens ou comandos do servidor.
+  delay(1);
 }
 
 
@@ -388,7 +453,7 @@ void buildPacket(uint8_t txBuffer[9]) {
   memset(txBuffer, 0, 9);
 
   // Converte temperatura removendo as vigrulas ( 25.34 -> 2534)
-  int16_t tempInt = (int16_t)(temperatura * 100);
+  int16_t tempInt = (int16_t)(temperaturaBMP * 100);
 
   // Converte pressão removendo as virgulas ( 1013.25 -> 1013)
   uint16_t pressInt = (uint16_t)(pressao);

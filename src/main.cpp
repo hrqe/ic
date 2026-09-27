@@ -63,7 +63,7 @@ void os_getDevKey (u1_t* buf) { }
 uint8_t txBuffer[6]; // 24
 static osjob_t sendjob;
 
-const unsigned TX_INTERVAL = 20; // 300=5 minutos esse intervalo define a frequência com que os pacotes de dados serão enviados via LoRaWAN. No exemplo, o intervalo é definido como 15 segundos, o que significa que o dispositivo tentará enviar um pacote de dados a cada 15 segundos. No entanto, devido às limitações de ciclo de trabalho (duty cycle) impostas pelas regulamentações de rádio, o intervalo real entre os envios pode ser maior se o dispositivo atingir o limite de transmissão permitido. É importante ajustar esse intervalo de acordo com as necessidades do aplicativo e as restrições da rede para garantir uma comunicação eficiente e em conformidade com as regulamentações.
+const unsigned TX_INTERVAL = 60; // 300=5 minutos esse intervalo define a frequência com que os pacotes de dados serão enviados via LoRaWAN. No exemplo, o intervalo é definido como 15 segundos, o que significa que o dispositivo tentará enviar um pacote de dados a cada 15 segundos. No entanto, devido às limitações de ciclo de trabalho (duty cycle) impostas pelas regulamentações de rádio, o intervalo real entre os envios pode ser maior se o dispositivo atingir o limite de transmissão permitido. É importante ajustar esse intervalo de acordo com as necessidades do aplicativo e as restrições da rede para garantir uma comunicação eficiente e em conformidade com as regulamentações.
 
 const lmic_pinmap lmic_pins = {
     .nss = 18,
@@ -273,9 +273,6 @@ void do_send(osjob_t* j){
     //LoraStatus = "OP_TXRXPEND, not sending";
     }
     else{
-
-        // ..........
-
         Serial.println("antes build packet");
         buildPacket(txBuffer);
         Serial.println("antes lmic_settxdata2");
@@ -365,6 +362,25 @@ void loop() {
         Serial.print("CO: ");
         Serial.println(co);
     }
+
+
+    // Mostra no display
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println("   MICS-6814 + DHT22");
+    display.setCursor(0, 16);
+    display.print("Temp: ");
+    display.print(temperatura, 1);
+    display.println(" C");
+    display.setCursor(0, 32);
+    display.print("Umd.: ");
+    display.print(umidade, 1);
+    display.println(" hPa");
+    display.setCursor(0, 48);
+    display.print("CO: ");
+    display.print(co, 0);
+    display.display();
 
     // Executa rotina LoRaWAN
     os_runloop_once(); // esse comando é essencial para que a biblioteca LMIC funcione corretamente. Ele processa os eventos de rede, como o envio e recebimento de pacotes, e garante que a comunicação LoRaWAN ocorra de forma eficiente. Sem essa chamada, o dispositivo não seria capaz de enviar ou receber dados via LoRaWAN, e a funcionalidade de comunicação sem fio não funcionaria como esperado.

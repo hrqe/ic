@@ -5,6 +5,7 @@
 //#include <Adafruit_BMP280.h> // biblioteca para usar o sensor de temperatura e pressão BMP280
 #include <Adafruit_GFX.h>    // biblioteca gráfica, usada para desenhar no display OLED
 #include <Adafruit_SSD1306.h> // biblioteca para controlar o display OLED SSD1306
+#include <Adafruit_ADS1X15.h> // biblioteca para ADS1115
 
 // sensor DHT22
 #include <DHT.h>
@@ -13,7 +14,8 @@
 DHT dht(DHT_PIN, DHT_TYPE);
 
 // mics analógico --> entradas ADC da esp
-#define MICS_CO_PIN   34
+//#define MICS_CO_PIN   34
+Adafruit_ADS1115 ads; // leitura do CO pelo ADS1115
 #define MICS_NH3_PIN  35
 #define MICS_NO2_PIN  36
 
@@ -60,7 +62,7 @@ void os_getDevKey (u1_t* buf) { }
 
 // buffer onde os dados do pacote serão armazenados antes de serem enviados via LoRaWAN.
 // está sobrando espaço, pois usaremos apenas 6 bytes para enviar os dados
-uint8_t txBuffer[6]; // 24
+uint8_t txBuffer[9]; // 24, 6
 static osjob_t sendjob;
 
 const unsigned TX_INTERVAL = 60; // 300=5 minutos esse intervalo define a frequência com que os pacotes de dados serão enviados via LoRaWAN. No exemplo, o intervalo é definido como 15 segundos, o que significa que o dispositivo tentará enviar um pacote de dados a cada 15 segundos. No entanto, devido às limitações de ciclo de trabalho (duty cycle) impostas pelas regulamentações de rádio, o intervalo real entre os envios pode ser maior se o dispositivo atingir o limite de transmissão permitido. É importante ajustar esse intervalo de acordo com as necessidades do aplicativo e as restrições da rede para garantir uma comunicação eficiente e em conformidade com as regulamentações.
@@ -293,6 +295,21 @@ void setup() {
     Serial.begin(115200); // começamos a conexão com o monitor serial, para debug e leitura de dados
     Wire.begin(OLED_SDA, OLED_SCL); // começamos a comunicar com o display
 
+    // inicialização ADS1115
+    if (!ads.begin()) {
+        Serial.println("Falha ao iniciar o ADS1115!");
+        while (1);
+    }
+    // twothirds == maior
+    // GAIN_TWOTHIRDS: ± 6.144 V (Padrão; 1 bit = 0.1875 mV no ADS1115)
+    // GAIN_ONE: ± 4.096 V (1 bit = 0.125 mV)
+    // GAIN_TWO: ± 2.048 V (1 bit = 0.0625 mV)
+    // GAIN_FOUR: ± 1.024 V (1 bit = 0.03125 mV)
+    // GAIN_EIGHT: ± 0.512 V (1 bit = 0.015625 mV)
+    // GAIN_SIXTEEN: ± 0.256 V (1 bit = 0.0078125 mV)
+    ads.setGain(GAIN_TWOTHIRDS); // faixa de tensao max lida
+
+
     delay(100); // delay para garantir que a comunicação aconteça antes de prosseguir
 
     // inicialização oled
@@ -318,7 +335,7 @@ void setup() {
     dht.begin();
 
     // conexão mics analogico
-    pinMode(MICS_CO_PIN, INPUT);
+    //pinMode(MICS_CO_PIN, INPUT); // comentado == passa pelo ADS1115
     pinMode(MICS_NH3_PIN, INPUT);
     pinMode(MICS_NO2_PIN, INPUT);
     analogReadResolution(12); // 0 a 4095
@@ -356,11 +373,16 @@ void loop() {
     }
 
 
-    if (agora - ultimoCO >= 2000) {
+    if (agora - ultimoCO >= 3000) {
         ultimoCO = agora;
-        co = analogRead(MICS_CO_PIN);
+        int16_t leitura = ads.readADC_SingleEnded(0); // canal A0
+        co = (uint16_t) leitura;
+
         Serial.print("CO: ");
-        Serial.println(co);
+        Serial.print(leitura);
+        Serial.print(" | Tensão: ");
+        Serial.print(ads.computeVolts(leitura), 3);
+        Serial.println(" V");
     }
 
 
@@ -405,9 +427,9 @@ void loop() {
 
 
 
-void buildPacket(uint8_t txBuffer[6]) { // 9
+void buildPacket(uint8_t txBuffer[8]) { // 9
     // Zera todo o buffer primeiro
-    memset(txBuffer, 0, 6);
+    memset(txBuffer, 0, 8);
     // Converte temperatura removendo as vigrulas ( 25.34 -> 2534)
     int16_t tempInt = (int16_t)(temperatura * 100);
     // Converte pressão removendo as virgulas ( 1013.25 -> 1013)
@@ -429,7 +451,7 @@ void buildPacket(uint8_t txBuffer[6]) { // 9
     //txBuffer[4] = n_packet >> 8;
     //txBuffer[5] = n_packet & 0xFF;
     txBuffer[4] = co >> 8;
-    txBuffer[5] = co & 0xFF;
+    txBuffer[7] = co & 0xFF;
 }
 
 /*

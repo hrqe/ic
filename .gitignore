@@ -5,3 +5,6 @@
 .vscode/ipch
 compile_commands.json
 bkcp.cpp
+*.swp
+*.swo
+

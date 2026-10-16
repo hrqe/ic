@@ -295,7 +295,7 @@ uint16_t co_min = 65535; // valor total na faixa de 32768 posit e negativo == 2^
 uint16_t co_max, co_amostras = 0;
 uint32_t co_soma = 0;
 
-const unsigned int DELAY_DISPLAY = 1000;
+const unsigned int DELAY_DISPLAY = 200;
 
 void setup() {
     Serial.begin(115200); // começamos a conexão com o monitor serial, para debug e leitura de dados
@@ -303,7 +303,7 @@ void setup() {
 
     // inicialização ADS1115
     if (!ads.begin()) {
-        Serial.println("Falha ao iniciar o ADS1115!");
+        Serial.println("Falha inicializacao ADS1115");
         while (1);
     }
     // GAIN_TWOTHIRDS: ± 6.144 V (Padrão; 1 bit = 0.1875 mV no ADS1115)
@@ -313,6 +313,7 @@ void setup() {
     // GAIN_EIGHT: ± 0.512 V (1 bit = 0.015625 mV)
     // GAIN_SIXTEEN: ± 0.256 V (1 bit = 0.0078125 mV)
     ads.setGain(GAIN_TWOTHIRDS); // faixa de tensao max lida
+    ads.setDataRate(RATE_ADS1115_64SPS);
 
     delay(100); // delay para garantir que a comunicação aconteça antes de prosseguir
 

@@ -291,7 +291,7 @@ void do_send(osjob_t* j){
 float temperatura = 0.0;
 float umidade = 0.0;
 uint16_t co = 0;
-uint16_t co_min = 65535;
+uint16_t co_min = 65535; // valor total na faixa de 32768 posit e negativo == 2^15
 uint16_t co_max, co_amostras = 0;
 uint32_t co_soma = 0;
 
@@ -347,7 +347,7 @@ void loop() {
     unsigned long agora = millis();
 
     // pino 13 para GPIO do DHT
-    if (agora - ultimoDHT >= 4000) {
+    if (agora - ultimoDHT >= 1000) {
         ultimoDHT = agora;
 
         float new_umidade = dht.readHumidity();
@@ -392,6 +392,9 @@ void loop() {
         ultimoDisplay = agora;
         float co_media = (co_amostras > 0) ? (float)co_soma / co_amostras : (float)co;
 
+        int16_t leitura = ads.readADC_SingleEnded(0); // canal A0
+
+
         display.clearDisplay();
         display.setTextColor(SSD1306_WHITE);
         display.setCursor(0, 0);
@@ -407,6 +410,9 @@ void loop() {
         display.setCursor(0, 33);
         display.print("CO: ");
         display.print(co);
+        display.print(" / ");
+        display.print(ads.computeVolts(leitura), 3);
+        display.print(" V");
         display.setCursor(0, 44);
         display.print(co_min);
         display.print(" / ");

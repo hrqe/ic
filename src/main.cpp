@@ -313,6 +313,7 @@ void setup() {
     // GAIN_EIGHT: ± 0.512 V (1 bit = 0.015625 mV)
     // GAIN_SIXTEEN: ± 0.256 V (1 bit = 0.0078125 mV)
     ads.setGain(GAIN_TWOTHIRDS); // faixa de tensao max lida
+    //ads.setMode == modo continuo?
     ads.setDataRate(RATE_ADS1115_64SPS);
 
     delay(100); // delay para garantir que a comunicação aconteça antes de prosseguir

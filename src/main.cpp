@@ -287,9 +287,15 @@ void do_send(osjob_t* j){
 
 
 
+// definição global valores sensores
 float temperatura = 0.0;
 float umidade = 0.0;
 uint16_t co = 0;
+uint16_t co_min = 65535;
+uint16_t co_max, co_amostras = 0;
+uint32_t co_soma = 0;
+
+const unsigned int DELAY_DISPLAY = 1000;
 
 void setup() {
     Serial.begin(115200); // começamos a conexão com o monitor serial, para debug e leitura de dados
@@ -300,7 +306,6 @@ void setup() {
         Serial.println("Falha ao iniciar o ADS1115!");
         while (1);
     }
-    // twothirds == maior
     // GAIN_TWOTHIRDS: ± 6.144 V (Padrão; 1 bit = 0.1875 mV no ADS1115)
     // GAIN_ONE: ± 4.096 V (1 bit = 0.125 mV)
     // GAIN_TWO: ± 2.048 V (1 bit = 0.0625 mV)
@@ -308,7 +313,6 @@ void setup() {
     // GAIN_EIGHT: ± 0.512 V (1 bit = 0.015625 mV)
     // GAIN_SIXTEEN: ± 0.256 V (1 bit = 0.0078125 mV)
     ads.setGain(GAIN_TWOTHIRDS); // faixa de tensao max lida
-
 
     delay(100); // delay para garantir que a comunicação aconteça antes de prosseguir
 
@@ -322,7 +326,6 @@ void setup() {
         Serial.println(F("SSD1306 allocation failed"));
         for(;;); // Don't proceed, loop forever
     }
-
     display.clearDisplay();
     display.setTextColor(WHITE);
     display.setTextSize(1);
@@ -334,32 +337,25 @@ void setup() {
     Serial.println("--> init DHT22");
     dht.begin();
 
-    // conexão mics analogico
-    //pinMode(MICS_CO_PIN, INPUT); // comentado == passa pelo ADS1115
-    pinMode(MICS_NH3_PIN, INPUT);
-    pinMode(MICS_NO2_PIN, INPUT);
-    analogReadResolution(12); // 0 a 4095
-    Serial.println("--> init MiCS-6814");
-
     setupLoRaWAN();
 }
 
 void loop() {
     static unsigned long ultimoDHT = 0;
     static unsigned long ultimoCO = 0;
+    static unsigned long ultimoDisplay = 0;
     unsigned long agora = millis();
 
-    // problema de guru mediation error somente quando sensor DHT é envolvido
-    // resolução mudando o pino GPIO, de 27 para 13
+    // pino 13 para GPIO do DHT
     if (agora - ultimoDHT >= 4000) {
         ultimoDHT = agora;
 
-        float novaUmidade = dht.readHumidity();
-        float novaTemperatura = dht.readTemperature();
+        float new_umidade = dht.readHumidity();
+        float new_temp = dht.readTemperature();
 
-        if (!isnan(novaUmidade) && !isnan(novaTemperatura)) {
-            umidade = novaUmidade;
-            temperatura = novaTemperatura;
+        if (!isnan(new_umidade) && !isnan(new_temp)) {
+            umidade = new_umidade;
+            temperatura = new_temp;
 
             Serial.print("Temperatura: ");
             Serial.print(temperatura);
@@ -373,10 +369,17 @@ void loop() {
     }
 
 
-    if (agora - ultimoCO >= 3000) {
+    if (agora - ultimoCO >= 100) {
         ultimoCO = agora;
         int16_t leitura = ads.readADC_SingleEnded(0); // canal A0
+        //if (leitura < 0) leitura = 0; // evitar ruido
         co = (uint16_t) leitura;
+
+        // atualiza mínimo, máximo e acumuladores da média
+        if (co < co_min) co_min = co;
+        if (co > co_max) co_max = co;
+        co_soma += co;
+        co_amostras++;
 
         Serial.print("CO: ");
         Serial.print(leitura);
@@ -385,29 +388,43 @@ void loop() {
         Serial.println(" V");
     }
 
+    if (agora - ultimoDisplay >= DELAY_DISPLAY) {
+        ultimoDisplay = agora;
+        float co_media = (co_amostras > 0) ? (float)co_soma / co_amostras : (float)co;
 
-    // Mostra no display
-    display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
-    display.println("   MICS-6814 + DHT22");
-    display.setCursor(0, 16);
-    display.print("Temp: ");
-    display.print(temperatura, 1);
-    display.println(" C");
-    display.setCursor(0, 32);
-    display.print("Umd.: ");
-    display.print(umidade, 1);
-    display.println(" hPa");
-    display.setCursor(0, 48);
-    display.print("CO: ");
-    display.print(co, 0);
-    display.display();
+        display.clearDisplay();
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 0);
+        display.println("   MICS-6814 + DHT22");
+        display.setCursor(0, 11);
+        display.print("Temp: ");
+        display.print(temperatura, 1);
+        display.println(" C");
+        display.setCursor(0, 22);
+        display.print("Umd.: ");
+        display.print(umidade, 1);
+        display.println(" %");
+        display.setCursor(0, 33);
+        display.print("CO: ");
+        display.print(co);
+        display.setCursor(0, 44);
+        display.print(co_min);
+        display.print(" / ");
+        display.print(co_max);
+        display.print(" / ");
+        display.print(co_media, 0);
+        display.display();
+
+        // reseta a média depois de exibida
+        co_soma = 0;
+        co_amostras = 0;
+    }
+
+
 
     // Executa rotina LoRaWAN
     os_runloop_once(); // esse comando é essencial para que a biblioteca LMIC funcione corretamente. Ele processa os eventos de rede, como o envio e recebimento de pacotes, e garante que a comunicação LoRaWAN ocorra de forma eficiente. Sem essa chamada, o dispositivo não seria capaz de enviar ou receber dados via LoRaWAN, e a funcionalidade de comunicação sem fio não funcionaria como esperado.
     // se ele não estivesse aqui o loop ficaria preso, e não conseguiria processar os eventos de rede, o que impediria o envio e recebimento de pacotes via LoRaWAN. Isso é crucial para garantir que a comunicação LoRaWAN ocorra de forma eficiente, permitindo que o dispositivo envie e receba dados conforme necessário.
-    //delay(1);
 }
 
 

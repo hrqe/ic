@@ -264,22 +264,17 @@ void setupLoRaWAN(){
   do_send(&sendjob);
 }
 
-// ==================================================================================
 
 
 
 void do_send(osjob_t* j){
-    Serial.println("entrou do_send");
     if (LMIC.opmode & OP_TXRXPEND){ // checa se o rádio já está ocupado transmitindo algo. Se estiver, ele aborta o novo envio para não causar colisão
         Serial.println(F("OP_TXRXPEND, not sending"));
     //LoraStatus = "OP_TXRXPEND, not sending";
     }
     else{
-        Serial.println("antes build packet");
         buildPacket(txBuffer);
-        Serial.println("antes lmic_settxdata2");
         LMIC_setTxData2(1, txBuffer, sizeof(txBuffer), 0);  // coloca o pacote na fila de envio na Porta 1. O parâmetro 0 indica que o envio não é confirmado, ou seja, o dispositivo não espera por um reconhecimento do servidor para considerar o envio bem-sucedido. Se fosse 1, o dispositivo aguardaria um reconhecimento do servidor para confirmar que o pacote foi recebido corretamente. O uso de envios não confirmados pode ser útil para economizar energia e reduzir a latência, mas pode resultar em perda de pacotes se houver interferência ou problemas de comunicação na rede.
-        Serial.println("depois lmic_settxdata2");
         Serial.println("Packet queued");
     }
     // Next TX is scheduled after TX_COMPLETE event.
@@ -291,17 +286,18 @@ void do_send(osjob_t* j){
 float temperatura = 0.0;
 float umidade = 0.0;
 uint16_t co = 0;
-uint16_t co_min = 65535; // valor total na faixa de 32768 posit e negativo == 2^15
-uint16_t co_max, co_amostras = 0;
+uint16_t co_min = 65535; // == -1, valor total na faixa de 32768 posit e negativo == 2^15
+uint16_t co_max = 0, co_quant_leituras = 0;
 uint32_t co_soma = 0;
 
-const unsigned int DELAY_DISPLAY = 200;
+const unsigned short DELAY_DISPLAY = 200;
 
 void setup() {
     Serial.begin(115200); // começamos a conexão com o monitor serial, para debug e leitura de dados
     Wire.begin(OLED_SDA, OLED_SCL); // começamos a comunicar com o display
 
     // inicialização ADS1115
+    Serial.println("--> init ADS1115");
     if (!ads.begin()) {
         Serial.println("Falha inicializacao ADS1115");
         while (1);
@@ -314,7 +310,7 @@ void setup() {
     // GAIN_SIXTEEN: ± 0.256 V (1 bit = 0.0078125 mV)
     ads.setGain(GAIN_TWOTHIRDS); // faixa de tensao max lida
     //ads.setMode == modo continuo?
-    ads.setDataRate(RATE_ADS1115_64SPS);
+    ads.setDataRate(RATE_ADS1115_64SPS); // 128 padrao
 
     delay(100); // delay para garantir que a comunicação aconteça antes de prosseguir
 
@@ -377,11 +373,13 @@ void loop() {
         //if (leitura < 0) leitura = 0; // evitar ruido
         co = (uint16_t) leitura;
 
-        // atualiza mínimo, máximo e acumuladores da média
-        if (co < co_min) co_min = co;
-        if (co > co_max) co_max = co;
+        // atualiza minimo, maximo e quantidade de leituras para a media
+        if (co < co_min)
+            co_min = co;
+        if (co > co_max)
+            co_max = co;
         co_soma += co;
-        co_amostras++;
+        co_quant_leituras++;
 
         Serial.print("CO: ");
         Serial.print(leitura);
@@ -392,9 +390,7 @@ void loop() {
 
     if (agora - ultimoDisplay >= DELAY_DISPLAY) {
         ultimoDisplay = agora;
-        float co_media = (co_amostras > 0) ? (float)co_soma / co_amostras : (float)co;
-
-        int16_t leitura = ads.readADC_SingleEnded(0); // canal A0
+        float co_media = (co_quant_leituras > 0) ? (float)co_soma / co_quant_leituras : (float)co;
 
 
         display.clearDisplay();
@@ -413,7 +409,7 @@ void loop() {
         display.print("CO: ");
         display.print(co);
         display.print(" / ");
-        display.print(ads.computeVolts(leitura), 3);
+        display.print(ads.computeVolts((int16_t)co_media), 3);
         display.print(" V");
         display.setCursor(0, 44);
         display.print(co_min);
@@ -423,31 +419,15 @@ void loop() {
         display.print(co_media, 0);
         display.display();
 
-        // reseta a média depois de exibida
         co_soma = 0;
-        co_amostras = 0;
+        co_quant_leituras = 0;
     }
-
 
 
     // Executa rotina LoRaWAN
     os_runloop_once(); // esse comando é essencial para que a biblioteca LMIC funcione corretamente. Ele processa os eventos de rede, como o envio e recebimento de pacotes, e garante que a comunicação LoRaWAN ocorra de forma eficiente. Sem essa chamada, o dispositivo não seria capaz de enviar ou receber dados via LoRaWAN, e a funcionalidade de comunicação sem fio não funcionaria como esperado.
     // se ele não estivesse aqui o loop ficaria preso, e não conseguiria processar os eventos de rede, o que impediria o envio e recebimento de pacotes via LoRaWAN. Isso é crucial para garantir que a comunicação LoRaWAN ocorra de forma eficiente, permitindo que o dispositivo envie e receba dados conforme necessário.
 }
-
-
-/*
-void setup() {
-    Serial.begin(115200);
-
-    setupLoRaWAN();
-}
-void loop() {
-    // Executa rotina LoRaWAN
-    os_runloop_once(); // esse comando é essencial para que a biblioteca LMIC funcione corretamente. Ele processa os eventos de rede, como o envio e recebimento de pacotes, e garante que a comunicação LoRaWAN ocorra de forma eficiente. Sem essa chamada, o dispositivo não seria capaz de enviar ou receber dados via LoRaWAN, e a funcionalidade de comunicação sem fio não funcionaria como esperado.
-    // se ele não estivesse aqui o loop ficaria preso, e não conseguiria processar os eventos de rede, o que impediria o envio e recebimento de pacotes via LoRaWAN. Isso é crucial para garantir que a comunicação sem fio funcione corretamente, permitindo que o dispositivo envie os dados coletados para a rede e receba quaisquer mensagens ou comandos do servidor.
-}
-*/
 
 
 

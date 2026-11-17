@@ -1,71 +1,239 @@
-#include <Arduino.h>  // biblioteca principal do arduino, para usar funções como pinMode, digitalWrite, delay, etc.
+// comentários no repositório github
+
+// CHECAR A SEQUENCIA DO CÓDIGO ANTES DE COMITAR
+
+#include <Arduino.h>  // biblioteca principal do arduino
 #include <lmic.h>     // biblioteca para comunicação LoRaWAN
 #include <hal/hal.h>  // biblioteca para acesso ao hardware específico da placa
-#include <Wire.h>     // biblioteca para comunicação I2C, usada tanto pelo OLED quanto pelo BMP280
-//#include <Adafruit_BMP280.h> // biblioteca para usar o sensor de temperatura e pressão BMP280
+#include <Wire.h>     // biblioteca para comunicação I2C, usada pelo OLED
 #include <Adafruit_GFX.h>    // biblioteca gráfica, usada para desenhar no display OLED
 #include <Adafruit_SSD1306.h> // biblioteca para controlar o display OLED SSD1306
 #include <Adafruit_ADS1X15.h> // biblioteca para ADS1115
 
-// sensor DHT22
+#define dummy 0 // dummy testar display sem precisar do sensor, 1==dummy, 0 == sensor real
+#define OLED_SDA 4 // pino de dados do OLED, conectado ao GPIO4 do TTGO
+#define OLED_SCL 15 // pino de clock do OLED, conectado ao GPIO15 do TTGO
+#define OLED_RST 16 // pino de reset do OLED, conectado ao GPIO16 do TTGO
+#define SCREEN_WIDTH 128 // largura do display OLED, em pixels
+#define SCREEN_HEIGHT 64 // altura do display OLED, em pixels
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST);
+
+//#define LMIC_DEBUG_LEVEL 1
+#define LORA_GAIN 10
+
 #include <DHT.h>
 #define DHT_PIN 13
 #define DHT_TYPE DHT22
 DHT dht(DHT_PIN, DHT_TYPE);
 
-// mics analógico --> entradas ADC da esp
-//#define MICS_CO_PIN   34
 Adafruit_ADS1115 ads; // leitura do CO pelo ADS1115
 #define MICS_NH3_PIN  35
 #define MICS_NO2_PIN  36
 
-//#define  LMIC_DEBUG_LEVEL = 1
-#define LMIC_DEBUG_LEVEL 1
-#define LORA_GAIN 10
-
+/*
 #ifdef COMPILE_REGRESSION_TEST
 # define FILLMEIN 0
 #else
 # warning "You must replace the values marked FILLMEIN with real values from the TTN control panel!"
 # define FILLMEIN (#dont edit this, edit the lines that use FILLMEIN)
 #endif
+*/
 
-// aqui temos defnições para o DISPLAY, PINOS, LEDS, DUMMY
-#define dummy 0 // uso de dummy, para testar o display sem precisar do sensor, 1 p/ dummy, 0 p/ sensor real
-#define OLED_SDA 4 // pino de dados do OLED, conectado ao GPIO4 do TTGO
-#define OLED_SCL 15 // pino de clock do OLED, conectado ao GPIO15 do TTGO
-#define OLED_RST 16 // pino de reset do OLED, conectado ao GPIO16 do TTGO
-#define SCREEN_WIDTH 128 // largura do display OLED, em pixels
-#define SCREEN_HEIGHT 64 // altura do display OLED, em pixels
+// j verificará se há algum trabalho de transmissão em andamento antes de enviar o novo pacote
+// envio do pacote através da função LMIC_setTxData2, após o envio outro é agendado após um intervalo TX_INTERVAL
 
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RST); // inicio do display, usando os pinos definidos acima
-//Adafruit_BMP280 _sensor; // definindo o sensor
-
-
-void buildPacket(uint8_t txBuffer[9]);
-void do_send(osjob_t* j); // Declaração da função do_send, que é responsável por enviar o pacote de dados via LoRaWAN. O parâmetro j é um ponteiro para uma estrutura osjob_t, que representa um trabalho agendado para execução. Essa função será chamada quando for necessário enviar um pacote de dados, e ela verificará se há algum trabalho de transmissão em andamento antes de enviar o novo pacote. Se não houver nenhum trabalho em andamento, ela construirá o pacote usando a função buildPacket e o enviará usando a função LMIC_setTxData2 da biblioteca LMIC. Após o envio, ela agendará o próximo envio para ocorrer após um intervalo de tempo definido por TX_INTERVAL.
-
+// LMIC ------------------------------------------------------------------------------------------
 //nwmskey e appskey são as chaves de rede e de aplicação para autenticar nosso dispositivo na rede lora
 // o devaddr é device adress, um idetenficiador unico do dispositivo na rede.
 static const u1_t PROGMEM NWKSKEY[16] = {0x6D, 0xDD, 0xD0, 0x2D, 0xE9, 0x20, 0x62, 0x27, 0x90, 0x51, 0x29, 0xC7, 0x30, 0xD2, 0xA4, 0xB7};
 static const u1_t PROGMEM APPSKEY[16] = {0x96, 0xCB, 0x3E, 0x51, 0xD0, 0x71, 0xB2, 0x5B, 0xD8, 0x52, 0x5A, 0x67, 0x20, 0x9E, 0x6D, 0xF9};
 static const u4_t DEVADDR = 0x260DF8C4;
-
-// definição dos nossos pacotes de dados, e do intervalo de envio
-int n_packet=0;
-// aqui são funções OTA, como não estou usando OTA, elas estão vazias.
-// mas são necessarias pois são chamadas pela biblioteca LMIC para obter as chaves de autenticação e o endereço do dispositivo. Se não fossem definidas, o código não compilava, pois a biblioteca espera que essas funções existam, mesmo que não sejam usadas. Elas estão vazias porque estamos usando chaves e endereço fixos definidos nas constantes NWKSKEY, APPSKEY e DEVADDR, em vez de obter esses valores dinamicamente por meio de OTA (Over-The-Air Activation).
+// funções OTA, necessárias por serem chamadas pela biblioteca LMIC
+// não compila sem elas, vazias pelos endereços serem definidos fixamente
 void os_getArtEui (u1_t* buf) { }
 void os_getDevEui (u1_t* buf) { }
 void os_getDevKey (u1_t* buf) { }
+
 
 // buffer onde os dados do pacote serão armazenados antes de serem enviados via LoRaWAN.
 // está sobrando espaço, pois usaremos apenas 6 bytes para enviar os dados
 uint8_t txBuffer[9]; // 24, 6
 static osjob_t sendjob;
 
-const unsigned TX_INTERVAL = 60; // 300=5 minutos esse intervalo define a frequência com que os pacotes de dados serão enviados via LoRaWAN. No exemplo, o intervalo é definido como 15 segundos, o que significa que o dispositivo tentará enviar um pacote de dados a cada 15 segundos. No entanto, devido às limitações de ciclo de trabalho (duty cycle) impostas pelas regulamentações de rádio, o intervalo real entre os envios pode ser maior se o dispositivo atingir o limite de transmissão permitido. É importante ajustar esse intervalo de acordo com as necessidades do aplicativo e as restrições da rede para garantir uma comunicação eficiente e em conformidade com as regulamentações.
+const unsigned TX_INTERVAL = 60; // freq envio de dados LoRaWAN
+// LMIC ------------------------------------------------------------------------------------------
+
+
+void buildPacket(uint8_t txBuffer[9]);
+void do_send(osjob_t* j); // envio pacote de dados
+void setupLoRaWAN();
+
+
+// definição global valores sensores
+float temperatura = 0.0;
+float umidade = 0.0;
+uint16_t co = 0;
+uint16_t co_min = 65535; // == -1, valor total na faixa de 32768 posit e negativo == 2^15
+uint16_t co_max = 0, co_quant_leituras = 0;
+uint32_t co_soma = 0;
+
+const unsigned short DELAY_DISPLAY = 200;
+
+void setup() {
+    Serial.begin(115200);
+    Wire.begin(OLED_SDA, OLED_SCL); // comunicação display
+
+    // inicialização ADS1115
+    Serial.println("--> init ADS1115");
+    if (!ads.begin()) {
+        Serial.println("--> erro leitura ADS1115");
+        while (1);
+    }
+    // faixa de tensao
+    ads.setGain(GAIN_TWOTHIRDS); // 6.144 V, 1 bit = 0.1875 mV
+    //ads.setMode == modo continuo?
+    ads.setDataRate(RATE_ADS1115_64SPS); // 128 padrao
+
+    delay(100); // delay para garantir que a comunicação aconteça antes de prosseguir
+
+    // inicialização oled
+    pinMode(OLED_RST, OUTPUT);
+    digitalWrite(OLED_RST, LOW);
+    delay(20);
+    digitalWrite(OLED_RST, HIGH);
+    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3c, false, false)){ // 0x3C for 128x32
+        Serial.println(F("SSD1306 allocation failed"));
+        for(;;); // Don't proceed, loop forever
+    }
+    display.clearDisplay();
+    display.setTextColor(WHITE);
+    display.setTextSize(1);
+    display.setCursor(20, 30); // perto do centro do display
+    display.print("MICS-6814 + DHT22");
+    display.display();
+
+    // inicialização DHT22
+    Serial.println("--> init DHT22");
+    dht.begin();
+
+    setupLoRaWAN();
+}
+
+
+// não colocar delay no loop
+void loop() {
+    static unsigned long ultimoDHT = 0;
+    static unsigned long ultimoCO = 0;
+    static unsigned long ultimoDisplay = 0;
+    unsigned long agora = millis();
+
+    // pino 13 para GPIO do DHT umidade + temp
+    if (agora - ultimoDHT >= 1000) {
+        ultimoDHT = agora;
+
+        float new_umidade = dht.readHumidity();
+        float new_temp = dht.readTemperature();
+
+        if (!isnan(new_umidade) && !isnan(new_temp)) {
+            umidade = new_umidade;
+            temperatura = new_temp;
+
+            Serial.print("Temperatura: ");
+            Serial.print(temperatura);
+            Serial.print(" C | Umidade: ");
+            Serial.print(umidade);
+            Serial.println(" %");
+        }
+        else {
+            Serial.println("--> erro leitura DHT22");
+        }
+    }
+
+    // co
+    if (agora - ultimoCO >= 100) {
+        ultimoCO = agora;
+        int16_t leitura = ads.readADC_SingleEnded(0); // canal A0
+        //if (leitura < 0) leitura = 0; // evitar ruido
+        co = (uint16_t) leitura;
+
+        // atualiza minimo, maximo e quantidade de leituras para a media
+        if (co < co_min)
+            co_min = co;
+        if (co > co_max)
+            co_max = co;
+        co_soma += co;
+        co_quant_leituras++;
+
+        Serial.print("CO: ");
+        Serial.print(leitura);
+        Serial.print(" | Tensão: ");
+        Serial.print(ads.computeVolts(leitura), 3);
+        Serial.println(" V");
+    }
+
+    // display ttgo
+    if (agora - ultimoDisplay >= DELAY_DISPLAY) {
+        ultimoDisplay = agora;
+        float co_media = (co_quant_leituras > 0) ? (float)co_soma / co_quant_leituras : (float)co;
+
+        display.clearDisplay();
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 0);
+        display.println("   MICS-6814 + DHT22");
+        display.setCursor(0, 11);
+        display.print("Temp: ");
+        display.print(temperatura, 1);
+        display.println(" C");
+        display.setCursor(0, 22);
+        display.print("Umd.: ");
+        display.print(umidade, 1);
+        display.println(" %");
+        display.setCursor(0, 33);
+        display.print("CO: ");
+        display.print(co);
+        display.print(" / ");
+        display.print(ads.computeVolts((int16_t)co_media), 3);
+        display.print(" V");
+        display.setCursor(0, 44);
+        display.print(co_min);
+        display.print(" / ");
+        display.print(co_max);
+        display.print(" / ");
+        display.print(co_media, 0);
+        display.display();
+
+        co_soma = 0;
+        co_quant_leituras = 0;
+    }
+
+    // Executa rotina LoRaWAN, impede que o loop fique preso
+    // processa eventos de rede (envio e recebimento de pacotes) + comunicação LoRaWAN
+    os_runloop_once();
+}
+
+
+void buildPacket(uint8_t txBuffer[8]) { // 9
+    // zera o buffer
+    memset(txBuffer, 0, 8);
+
+    // conversão em int para remover as virgulas
+    int16_t tempInt = (int16_t)(temperatura * 100);
+    uint16_t umidInt = (uint16_t)(umidade);
+
+    // a parte alta é obtida deslocando os bits para a direita em 8 posições, bits mais significativos do valor.
+    // A parte baixa é obtida usando uma operação AND com 0xFF (tempInt & 0xFF)
+    txBuffer[0] = tempInt >> 8;
+    txBuffer[1] = tempInt & 0xFF;
+    txBuffer[2] = umidInt >> 8;
+    txBuffer[3] = umidInt & 0xFF;
+    txBuffer[4] = co >> 8;
+    txBuffer[7] = co & 0xFF;
+}
+
+
+
+// LMIC ------------------------------------------------------------------------------------------
 
 const lmic_pinmap lmic_pins = {
     .nss = 18,
@@ -73,8 +241,6 @@ const lmic_pinmap lmic_pins = {
     .rst = 14,   // For TTGO 14, T-Beam 23
     .dio = {26, 33, 32}  // Pins for the Heltec ESP32 Lora board/ TTGO Lora32 with 3D metal antenna
 };
-
-// ==================================================================================
 
 void onEvent (ev_t ev) {
   Serial.print(os_getTime());
@@ -98,14 +264,6 @@ void onEvent (ev_t ev) {
     case EV_JOINED:
       Serial.println(F("EV_JOINED"));
       break;
-    /*
-      || This event is defined but not used in the code. No
-      || point in wasting codespace on it.
-      ||
-      || case EV_RFU1:
-      ||     Serial.println(F("EV_RFU1"));
-      ||     break;
-    */
     case EV_JOIN_FAILED:
       Serial.println(F("EV_JOIN_FAILED"));
       break;
@@ -140,14 +298,6 @@ void onEvent (ev_t ev) {
     case EV_LINK_ALIVE:
       Serial.println(F("EV_LINK_ALIVE"));
       break;
-    /*
-      || This event is defined but not used in the code. No
-      || point in wasting codespace on it.
-      ||
-      || case EV_SCAN_FOUND:
-      ||    Serial.println(F("EV_SCAN_FOUND"));
-      ||    break;
-    */
     case EV_TXSTART:
       Serial.println(F("EV_TXSTART"));
       break;
@@ -167,11 +317,24 @@ void onEvent (ev_t ev) {
   }
 }
 
+void do_send(osjob_t* j){
+    if (LMIC.opmode & OP_TXRXPEND){ // checa se o rádio já está ocupado transmitindo algo. Se estiver, ele aborta o novo envio para não causar colisão
+        Serial.println(F("OP_TXRXPEND, not sending"));
+    //LoraStatus = "OP_TXRXPEND, not sending";
+    }
+    else{
+        buildPacket(txBuffer);
+        LMIC_setTxData2(1, txBuffer, sizeof(txBuffer), 0);  // coloca o pacote na fila de envio na Porta 1. O parâmetro 0 indica que o envio não é confirmado, ou seja, o dispositivo não espera por um reconhecimento do servidor para considerar o envio bem-sucedido. Se fosse 1, o dispositivo aguardaria um reconhecimento do servidor para confirmar que o pacote foi recebido corretamente. O uso de envios não confirmados pode ser útil para economizar energia e reduzir a latência, mas pode resultar em perda de pacotes se houver interferência ou problemas de comunicação na rede.
+        Serial.println("Packet queued");
+    }
+    // Next TX is scheduled after TX_COMPLETE event.
+}
+
 
 void setupLoRaWAN(){
   Serial.println();
   Serial.println(F("--> init LMIC"));
-  // LMIC init
+
   os_init();
   // Reset the MAC state. Session and pending data transfers will be discarded.
   LMIC_reset();
@@ -232,24 +395,7 @@ void setupLoRaWAN(){
   // LMIC_setupChannel(1, 923400000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_CENTI);
 
   // ... extra definitions for channels 2..n here
-#elif defined(CFG_kr920)
-  // Set up the channels used in your country. Three are defined by default,
-  // and they cannot be changed. Duty cycle doesn't matter, but is conventionally
-  // BAND_MILLI.
-  // LMIC_setupChannel(0, 922100000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_MILLI);
-  // LMIC_setupChannel(1, 922300000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_MILLI);
-  // LMIC_setupChannel(2, 922500000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_MILLI);
 
-  // ... extra definitions for channels 3..n here.
-#elif defined(CFG_in866)
-  // Set up the channels used in your country. Three are defined by default,
-  // and they cannot be changed. Duty cycle doesn't matter, but is conventionally
-  // BAND_MILLI.
-  // LMIC_setupChannel(0, 865062500, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_MILLI);
-  // LMIC_setupChannel(1, 865402500, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_MILLI);
-  // LMIC_setupChannel(2, 865985000, DR_RANGE_MAP(DR_SF12, DR_SF7),  BAND_MILLI);
-
-  // ... extra definitions for channels 3..n here.
 #else
 # error Region not supported
 #endif
@@ -264,212 +410,4 @@ void setupLoRaWAN(){
   do_send(&sendjob);
 }
 
-
-
-
-void do_send(osjob_t* j){
-    if (LMIC.opmode & OP_TXRXPEND){ // checa se o rádio já está ocupado transmitindo algo. Se estiver, ele aborta o novo envio para não causar colisão
-        Serial.println(F("OP_TXRXPEND, not sending"));
-    //LoraStatus = "OP_TXRXPEND, not sending";
-    }
-    else{
-        buildPacket(txBuffer);
-        LMIC_setTxData2(1, txBuffer, sizeof(txBuffer), 0);  // coloca o pacote na fila de envio na Porta 1. O parâmetro 0 indica que o envio não é confirmado, ou seja, o dispositivo não espera por um reconhecimento do servidor para considerar o envio bem-sucedido. Se fosse 1, o dispositivo aguardaria um reconhecimento do servidor para confirmar que o pacote foi recebido corretamente. O uso de envios não confirmados pode ser útil para economizar energia e reduzir a latência, mas pode resultar em perda de pacotes se houver interferência ou problemas de comunicação na rede.
-        Serial.println("Packet queued");
-    }
-    // Next TX is scheduled after TX_COMPLETE event.
-}
-
-
-
-// definição global valores sensores
-float temperatura = 0.0;
-float umidade = 0.0;
-uint16_t co = 0;
-uint16_t co_min = 65535; // == -1, valor total na faixa de 32768 posit e negativo == 2^15
-uint16_t co_max = 0, co_quant_leituras = 0;
-uint32_t co_soma = 0;
-
-const unsigned short DELAY_DISPLAY = 200;
-
-void setup() {
-    Serial.begin(115200); // começamos a conexão com o monitor serial, para debug e leitura de dados
-    Wire.begin(OLED_SDA, OLED_SCL); // começamos a comunicar com o display
-
-    // inicialização ADS1115
-    Serial.println("--> init ADS1115");
-    if (!ads.begin()) {
-        Serial.println("Falha inicializacao ADS1115");
-        while (1);
-    }
-    // GAIN_TWOTHIRDS: ± 6.144 V (Padrão; 1 bit = 0.1875 mV no ADS1115)
-    // GAIN_ONE: ± 4.096 V (1 bit = 0.125 mV)
-    // GAIN_TWO: ± 2.048 V (1 bit = 0.0625 mV)
-    // GAIN_FOUR: ± 1.024 V (1 bit = 0.03125 mV)
-    // GAIN_EIGHT: ± 0.512 V (1 bit = 0.015625 mV)
-    // GAIN_SIXTEEN: ± 0.256 V (1 bit = 0.0078125 mV)
-    ads.setGain(GAIN_TWOTHIRDS); // faixa de tensao max lida
-    //ads.setMode == modo continuo?
-    ads.setDataRate(RATE_ADS1115_64SPS); // 128 padrao
-
-    delay(100); // delay para garantir que a comunicação aconteça antes de prosseguir
-
-    // inicialização oled
-    pinMode(OLED_RST, OUTPUT);
-    digitalWrite(OLED_RST, LOW);
-    delay(20);
-    digitalWrite(OLED_RST, HIGH);
-
-    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3c, false, false)){ // Address 0x3C for 128x32
-        Serial.println(F("SSD1306 allocation failed"));
-        for(;;); // Don't proceed, loop forever
-    }
-    display.clearDisplay();
-    display.setTextColor(WHITE);
-    display.setTextSize(1);
-    display.setCursor(20, 30); // perto do centro do display
-    display.print("MICS-6814 + DHT22");
-    display.display();
-
-    // inicialização DHT22
-    Serial.println("--> init DHT22");
-    dht.begin();
-
-    setupLoRaWAN();
-}
-
-void loop() {
-    static unsigned long ultimoDHT = 0;
-    static unsigned long ultimoCO = 0;
-    static unsigned long ultimoDisplay = 0;
-    unsigned long agora = millis();
-
-    // pino 13 para GPIO do DHT
-    if (agora - ultimoDHT >= 1000) {
-        ultimoDHT = agora;
-
-        float new_umidade = dht.readHumidity();
-        float new_temp = dht.readTemperature();
-
-        if (!isnan(new_umidade) && !isnan(new_temp)) {
-            umidade = new_umidade;
-            temperatura = new_temp;
-
-            Serial.print("Temperatura: ");
-            Serial.print(temperatura);
-            Serial.print(" C | Umidade: ");
-            Serial.print(umidade);
-            Serial.println(" %");
-        }
-        else {
-            Serial.println("--> erro leitura DHT22");
-        }
-    }
-
-
-    if (agora - ultimoCO >= 100) {
-        ultimoCO = agora;
-        int16_t leitura = ads.readADC_SingleEnded(0); // canal A0
-        //if (leitura < 0) leitura = 0; // evitar ruido
-        co = (uint16_t) leitura;
-
-        // atualiza minimo, maximo e quantidade de leituras para a media
-        if (co < co_min)
-            co_min = co;
-        if (co > co_max)
-            co_max = co;
-        co_soma += co;
-        co_quant_leituras++;
-
-        Serial.print("CO: ");
-        Serial.print(leitura);
-        Serial.print(" | Tensão: ");
-        Serial.print(ads.computeVolts(leitura), 3);
-        Serial.println(" V");
-    }
-
-    if (agora - ultimoDisplay >= DELAY_DISPLAY) {
-        ultimoDisplay = agora;
-        float co_media = (co_quant_leituras > 0) ? (float)co_soma / co_quant_leituras : (float)co;
-
-
-        display.clearDisplay();
-        display.setTextColor(SSD1306_WHITE);
-        display.setCursor(0, 0);
-        display.println("   MICS-6814 + DHT22");
-        display.setCursor(0, 11);
-        display.print("Temp: ");
-        display.print(temperatura, 1);
-        display.println(" C");
-        display.setCursor(0, 22);
-        display.print("Umd.: ");
-        display.print(umidade, 1);
-        display.println(" %");
-        display.setCursor(0, 33);
-        display.print("CO: ");
-        display.print(co);
-        display.print(" / ");
-        display.print(ads.computeVolts((int16_t)co_media), 3);
-        display.print(" V");
-        display.setCursor(0, 44);
-        display.print(co_min);
-        display.print(" / ");
-        display.print(co_max);
-        display.print(" / ");
-        display.print(co_media, 0);
-        display.display();
-
-        co_soma = 0;
-        co_quant_leituras = 0;
-    }
-
-
-    // Executa rotina LoRaWAN
-    os_runloop_once(); // esse comando é essencial para que a biblioteca LMIC funcione corretamente. Ele processa os eventos de rede, como o envio e recebimento de pacotes, e garante que a comunicação LoRaWAN ocorra de forma eficiente. Sem essa chamada, o dispositivo não seria capaz de enviar ou receber dados via LoRaWAN, e a funcionalidade de comunicação sem fio não funcionaria como esperado.
-    // se ele não estivesse aqui o loop ficaria preso, e não conseguiria processar os eventos de rede, o que impediria o envio e recebimento de pacotes via LoRaWAN. Isso é crucial para garantir que a comunicação LoRaWAN ocorra de forma eficiente, permitindo que o dispositivo envie e receba dados conforme necessário.
-}
-
-
-
-
-void buildPacket(uint8_t txBuffer[8]) { // 9
-    // Zera todo o buffer primeiro
-    memset(txBuffer, 0, 8);
-    // Converte temperatura removendo as vigrulas ( 25.34 -> 2534)
-    int16_t tempInt = (int16_t)(temperatura * 100);
-    // Converte pressão removendo as virgulas ( 1013.25 -> 1013)
-    uint16_t umidInt = (uint16_t)(umidade);
-
-    // como esses dados foram guardados em 2 bytes, vamos dividir esse valor em dois bytes para envia-lo
-    //vamos separar em parte alta e parte baixa, usando operações bitwise
-    // a parte alta é obtida deslocando os bits para a direita em 8 posições (tempInt >> 8), o que nos dá os bits mais significativos do valor.
-    // A parte baixa é obtida usando uma operação AND com 0xFF (tempInt & 0xFF),
-    // que nos dá os bits menos significativos do valor.
-    // Temperatura ocupa 2 bytes
-    txBuffer[0] = tempInt >> 8;
-    txBuffer[1] = tempInt & 0xFF;
-    // Pressão ocupa 2 bytes
-    txBuffer[2] = umidInt >> 8;
-    txBuffer[3] = umidInt & 0xFF;
-    // Contador de pacotes (2 bytes)
-    //txBuffer[4] = 4;
-    //txBuffer[4] = n_packet >> 8;
-    //txBuffer[5] = n_packet & 0xFF;
-    txBuffer[4] = co >> 8;
-    txBuffer[7] = co & 0xFF;
-}
-
-/*
-void buildPacket(uint8_t txBuffer[6]) {
-    memset(txBuffer, 0, 6);
-    txBuffer[0] = co >> 8;
-    txBuffer[1] = co & 0xFF;
-
-    int16_t tempInt = (int16_t)(temperatura * 100);
-    txBuffer[2] = tempInt >> 8;
-    txBuffer[3] = tempInt & 0xFF;
-
-    //txBuffer[4] = 0x03;
-    //txBuffer[5] = 0x04;
-}
-*/
+// LMIC ------------------------------------------------------------------------------------------
